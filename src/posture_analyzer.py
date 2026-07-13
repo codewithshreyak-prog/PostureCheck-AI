@@ -19,8 +19,10 @@ class PostureAnalyzer:
 
         left_shoulder = landmarks[self.LEFT_SHOULDER]
         right_shoulder = landmarks[self.RIGHT_SHOULDER]
+
         left_ear = landmarks[self.LEFT_EAR]
         right_ear = landmarks[self.RIGHT_EAR]
+
         left_hip = landmarks[self.LEFT_HIP]
         right_hip = landmarks[self.RIGHT_HIP]
 
@@ -91,12 +93,28 @@ class PostureAnalyzer:
         if abs(torso_lean) <= 4:
             feedback.append("Torso is upright.")
         elif abs(torso_lean) <= 8:
-            direction = "right" if torso_lean > 0 else "left"
-            feedback.append(f"Torso is leaning slightly {direction}.")
+            direction = (
+                "right"
+                if torso_lean > 0
+                else "left"
+            )
+
+            feedback.append(
+                f"Torso is leaning slightly {direction}."
+            )
+
             score -= 10
         else:
-            direction = "right" if torso_lean > 0 else "left"
-            feedback.append(f"Torso is leaning significantly {direction}.")
+            direction = (
+                "right"
+                if torso_lean > 0
+                else "left"
+            )
+
+            feedback.append(
+                f"Torso is leaning significantly {direction}."
+            )
+
             score -= 20
 
         score = max(score, 0)
@@ -120,21 +138,35 @@ class PostureAnalyzer:
 
     @staticmethod
     def _horizontal_angle(point1, point2) -> float:
-        """Calculate the angle of two landmarks from the horizontal."""
+        """
+        Calculate tilt relative to the horizontal axis.
+
+        Normalize mirrored-camera angles from approximately
+        180 degrees into the expected -90 to 90 degree range.
+        """
 
         delta_y = point2.y - point1.y
         delta_x = point2.x - point1.x
 
-        return math.degrees(math.atan2(delta_y, delta_x))
+        angle = math.degrees(
+            math.atan2(delta_y, delta_x)
+        )
+
+        if angle > 90:
+            angle -= 180
+        elif angle < -90:
+            angle += 180
+
+        return angle
 
     @staticmethod
     def _midpoint(point1, point2) -> tuple[float, float]:
         """Return the midpoint between two landmarks."""
 
-        x = (point1.x + point2.x) / 2
-        y = (point1.y + point2.y) / 2
+        midpoint_x = (point1.x + point2.x) / 2
+        midpoint_y = (point1.y + point2.y) / 2
 
-        return x, y
+        return midpoint_x, midpoint_y
 
     @staticmethod
     def _vertical_angle(
