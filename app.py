@@ -1,5 +1,6 @@
 import cv2
 
+from src.feedback import PostureFeedbackGenerator
 from src.pose_detector import PoseDetector
 from src.posture_analyzer import PostureAnalyzer
 from src.posture_smoother import PostureSmoother
@@ -9,13 +10,9 @@ def draw_posture_information(
     frame,
     analysis,
 ) -> None:
-    """Display posture measurements and guidance."""
+    """Display posture results and correction guidance."""
 
-    is_valid = analysis.get(
-        "valid",
-        False,
-    )
-
+    is_valid = analysis.get("valid", False)
     score = analysis["score"]
 
     if not is_valid:
@@ -37,7 +34,7 @@ def draw_posture_information(
     cv2.rectangle(
         overlay,
         (10, 10),
-        (590, 340),
+        (700, 420),
         (0, 0, 0),
         -1,
     )
@@ -62,13 +59,9 @@ def draw_posture_information(
     )
 
     if is_valid:
-        score_text = (
-            f"Posture Score: {score}/100"
-        )
+        score_text = f"Posture Score: {score}/100"
     else:
-        score_text = (
-            "Posture Score: Not available"
-        )
+        score_text = "Posture Score: Not available"
 
     cv2.putText(
         frame,
@@ -128,22 +121,55 @@ def draw_posture_information(
 
             y_position += 28
 
-    for feedback in analysis["feedback"][:3]:
         cv2.putText(
             frame,
-            feedback,
+            "Recommendations:",
+            (25, y_position + 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.58,
+            posture_color,
+            2,
+        )
+
+        y_position += 37
+
+        messages = analysis.get(
+            "recommendations",
+            [],
+        )
+
+    else:
+        messages = analysis.get(
+            "feedback",
+            [],
+        )
+
+    for message_number, message in enumerate(
+        messages[:3],
+        start=1,
+    ):
+        if is_valid:
+            display_text = (
+                f"{message_number}. {message}"
+            )
+        else:
+            display_text = message
+
+        cv2.putText(
+            frame,
+            display_text,
             (25, y_position),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.47,
+            0.48,
             posture_color,
             1,
         )
 
-        y_position += 26
+        y_position += 27
 
 
 def start_webcam() -> None:
-    """Start the posture detection application."""
+    """Start the PostureCheck AI webcam application."""
 
     camera = cv2.VideoCapture(
         0,
@@ -163,13 +189,11 @@ def start_webcam() -> None:
         minimum_frames=6,
     )
 
+    feedback_generator = PostureFeedbackGenerator()
+
     print("PostureCheck AI started.")
-    print(
-        "Keep your head, shoulders, and hips visible."
-    )
-    print(
-        "Hold still briefly while posture is calibrated."
-    )
+    print("Keep your head, shoulders, and hips visible.")
+    print("Hold still briefly while posture is calibrated.")
     print("Press Q to close the application.")
 
     try:
@@ -177,9 +201,7 @@ def start_webcam() -> None:
             success, frame = camera.read()
 
             if not success or frame is None:
-                print(
-                    "Unable to read webcam frame."
-                )
+                print("Unable to read webcam frame.")
                 continue
 
             frame = cv2.flip(
@@ -192,6 +214,8 @@ def start_webcam() -> None:
                     frame
                 )
             )
+
+            landmarks = None
 
             if pose_results.pose_landmarks:
                 landmarks = (
@@ -212,6 +236,13 @@ def start_webcam() -> None:
                 raw_analysis
             )
 
+            analysis["recommendations"] = (
+                feedback_generator.generate(
+                    analysis,
+                    landmarks,
+                )
+            )
+
             draw_posture_information(
                 frame,
                 analysis,
@@ -222,10 +253,7 @@ def start_webcam() -> None:
                 frame,
             )
 
-            if (
-                cv2.waitKey(1) & 0xFF
-                == ord("q")
-            ):
+            if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
     finally:
