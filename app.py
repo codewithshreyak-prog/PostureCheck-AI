@@ -1,7 +1,10 @@
-import cv2
+import sqlite3
 import textwrap
 
+import cv2
+
 from src.assessment_engine import PostureAssessmentEngine
+from src.database import AssessmentDatabase
 from src.feedback import PostureFeedbackGenerator
 from src.pose_detector import PoseDetector
 from src.posture_analyzer import PostureAnalyzer
@@ -9,7 +12,7 @@ from src.posture_smoother import PostureSmoother
 
 
 def posture_color(score: int):
-    """Return an OpenCV color for a posture score."""
+    """Return an OpenCV color based on posture score."""
 
     if score >= 85:
         return 0, 255, 0
@@ -22,17 +25,29 @@ def posture_color(score: int):
 
 def draw_panel_background(
     frame,
-    width: int = 710,
+    width: int = 610,
     height: int = 430,
 ) -> None:
-    """Draw the transparent information panel."""
+    """Draw a transparent information panel."""
+
+    frame_height, frame_width = frame.shape[:2]
+
+    panel_right = min(
+        width,
+        frame_width - 10,
+    )
+
+    panel_bottom = min(
+        height,
+        frame_height - 10,
+    )
 
     overlay = frame.copy()
 
     cv2.rectangle(
         overlay,
         (10, 10),
-        (width, height),
+        (panel_right, panel_bottom),
         (0, 0, 0),
         -1,
     )
@@ -55,7 +70,7 @@ def draw_line(
     scale: float = 0.55,
     thickness: int = 1,
 ) -> None:
-    """Draw one line inside the information panel."""
+    """Draw one line of text inside the panel."""
 
     cv2.putText(
         frame,
@@ -71,10 +86,15 @@ def draw_line(
 def draw_ready_screen(
     frame,
     live_analysis: dict,
+    history_summary: dict,
 ) -> None:
-    """Display positioning guidance before assessment."""
+    """Display camera positioning instructions."""
 
-    draw_panel_background(frame)
+    draw_panel_background(
+        frame,
+        width=620,
+        height=440,
+    )
 
     draw_line(
         frame,
@@ -97,54 +117,51 @@ def draw_ready_screen(
 
         draw_line(
             frame,
-            "Your head, shoulders, and hips are visible.",
-            122,
+            "Head, shoulders, and hips are visible.",
+            120,
         )
 
         draw_line(
             frame,
-            "Press SPACE to begin the posture assessment.",
-            160,
+            "Press SPACE to begin assessment.",
+            158,
             (0, 255, 255),
             0.58,
             2,
         )
 
-        draw_line(
-            frame,
+        measurements = [
             (
-                "Shoulder angle: "
-                f"{live_analysis['shoulder_angle']:.1f} deg"
+                "Shoulder angle",
+                live_analysis["shoulder_angle"],
             ),
-            215,
-        )
+            (
+                "Head tilt",
+                live_analysis["head_tilt"],
+            ),
+            (
+                "Hip angle",
+                live_analysis["hip_angle"],
+            ),
+            (
+                "Torso lean",
+                live_analysis["torso_lean"],
+            ),
+        ]
 
-        draw_line(
-            frame,
-            (
-                "Head tilt: "
-                f"{live_analysis['head_tilt']:.1f} deg"
-            ),
-            245,
-        )
+        y_position = 205
 
-        draw_line(
-            frame,
-            (
-                "Hip angle: "
-                f"{live_analysis['hip_angle']:.1f} deg"
-            ),
-            275,
-        )
+        for label, value in measurements:
+            draw_line(
+                frame,
+                f"{label}: {value:.1f} deg",
+                y_position,
+                (255, 255, 255),
+                0.49,
+            )
 
-        draw_line(
-            frame,
-            (
-                "Torso lean: "
-                f"{live_analysis['torso_lean']:.1f} deg"
-            ),
-            305,
-        )
+            y_position += 28
+
     else:
         draw_line(
             frame,
@@ -157,37 +174,73 @@ def draw_ready_screen(
 
         feedback = live_analysis.get(
             "feedback",
-            ["Move farther back and remain visible."],
+            [
+                "Move farther back and keep your body visible."
+            ],
         )
 
         y_position = 130
 
         for message in feedback[:3]:
-            draw_line(
-                frame,
+            wrapped_lines = textwrap.wrap(
                 message,
-                y_position,
-                (0, 165, 255),
+                width=55,
             )
 
-            y_position += 35
+            for line in wrapped_lines:
+                draw_line(
+                    frame,
+                    line,
+                    y_position,
+                    (0, 165, 255),
+                    0.5,
+                )
+
+                y_position += 29
 
     draw_line(
         frame,
-        "Q: Quit",
-        395,
+        (
+            "Saved assessments: "
+            f"{history_summary['total_assessments']}"
+        ),
+        365,
         (255, 255, 255),
-        0.5,
+        0.48,
+    )
+
+    draw_line(
+        frame,
+        (
+            "History average: "
+            f"{history_summary['average_score']:.1f}"
+        ),
+        392,
+        (255, 255, 255),
+        0.48,
+    )
+
+    draw_line(
+        frame,
+        "SPACE: Start | Q: Quit",
+        420,
+        (0, 255, 255),
+        0.46,
+        2,
     )
 
 
 def draw_countdown_screen(
     frame,
-    assessment_engine,
+    assessment_engine: PostureAssessmentEngine,
 ) -> None:
-    """Display the preparation countdown."""
+    """Display the assessment countdown."""
 
-    draw_panel_background(frame)
+    draw_panel_background(
+        frame,
+        width=570,
+        height=400,
+    )
 
     countdown = (
         assessment_engine.countdown_remaining()
@@ -196,7 +249,7 @@ def draw_countdown_screen(
     draw_line(
         frame,
         "Get Ready",
-        75,
+        70,
         (0, 255, 255),
         0.9,
         2,
@@ -205,7 +258,7 @@ def draw_countdown_screen(
     cv2.putText(
         frame,
         str(countdown),
-        (300, 245),
+        (250, 230),
         cv2.FONT_HERSHEY_SIMPLEX,
         4.5,
         (0, 255, 255),
@@ -215,27 +268,33 @@ def draw_countdown_screen(
     draw_line(
         frame,
         "Stand naturally and look straight ahead.",
-        320,
+        300,
         (255, 255, 255),
-        0.62,
+        0.58,
         2,
     )
 
     draw_line(
         frame,
         "Keep your shoulders relaxed.",
-        360,
+        340,
+        (255, 255, 255),
+        0.55,
     )
 
 
 def draw_collection_screen(
     frame,
-    assessment_engine,
-    live_analysis,
+    assessment_engine: PostureAssessmentEngine,
+    live_analysis: dict,
 ) -> None:
-    """Display progress without showing a changing score."""
+    """Display assessment progress without a changing score."""
 
-    draw_panel_background(frame)
+    draw_panel_background(
+        frame,
+        width=680,
+        height=380,
+    )
 
     progress = (
         assessment_engine.collection_progress()
@@ -265,7 +324,7 @@ def draw_collection_screen(
 
     bar_left = 25
     bar_top = 120
-    bar_width = 620
+    bar_width = 600
     bar_height = 28
 
     cv2.rectangle(
@@ -305,7 +364,7 @@ def draw_collection_screen(
 
     draw_line(
         frame,
-        "Hold your normal posture. Avoid deliberate correction.",
+        "Hold your natural posture.",
         235,
         (255, 255, 255),
         0.55,
@@ -313,8 +372,8 @@ def draw_collection_screen(
 
     draw_line(
         frame,
-        "The final score will appear after measurement.",
-        272,
+        "The final score appears after measurement.",
+        270,
         (255, 255, 255),
         0.55,
     )
@@ -322,7 +381,7 @@ def draw_collection_screen(
     if not live_analysis.get("valid", False):
         draw_line(
             frame,
-            "Body visibility reduced. Return to the marked position.",
+            "Body visibility reduced. Return to position.",
             325,
             (0, 165, 255),
             0.52,
@@ -333,13 +392,14 @@ def draw_collection_screen(
 def draw_final_screen(
     frame,
     result: dict,
+    saved_assessment_id,
 ) -> None:
-    """Display a compact frozen assessment result."""
+    """Display the compact frozen assessment result."""
 
     draw_panel_background(
         frame,
-        width=570,
-        height=485,
+        width=585,
+        height=520,
     )
 
     color = posture_color(
@@ -382,22 +442,33 @@ def draw_final_screen(
         132,
         (255, 255, 255),
         0.48,
-        1,
     )
 
     measurements = [
-        f"Shoulders: {result['shoulder_angle']:.1f} deg",
-        f"Head tilt: {result['head_tilt']:.1f} deg",
-        f"Hips: {result['hip_angle']:.1f} deg",
-        f"Torso lean: {result['torso_lean']:.1f} deg",
+        (
+            "Shoulders",
+            result["shoulder_angle"],
+        ),
+        (
+            "Head tilt",
+            result["head_tilt"],
+        ),
+        (
+            "Hips",
+            result["hip_angle"],
+        ),
+        (
+            "Torso lean",
+            result["torso_lean"],
+        ),
     ]
 
     y_position = 170
 
-    for measurement in measurements:
+    for label, value in measurements:
         draw_line(
             frame,
-            measurement,
+            f"{label}: {value:.1f} deg",
             y_position,
             (255, 255, 255),
             0.46,
@@ -408,14 +479,13 @@ def draw_final_screen(
     draw_line(
         frame,
         "Recommendations",
-        292,
+        290,
         color,
         0.52,
         2,
     )
 
-    y_position = 322
-    maximum_recommendation_y = 420
+    y_position = 320
 
     for number, recommendation in enumerate(
         result.get("recommendations", [])[:3],
@@ -423,19 +493,23 @@ def draw_final_screen(
     ):
         wrapped_lines = textwrap.wrap(
             recommendation,
-            width=48,
+            width=49,
         )
 
         for line_index, line in enumerate(
             wrapped_lines
         ):
-            if y_position > maximum_recommendation_y:
+            if y_position > 415:
                 break
 
             if line_index == 0:
-                display_text = f"{number}. {line}"
+                display_text = (
+                    f"{number}. {line}"
+                )
             else:
-                display_text = f"   {line}"
+                display_text = (
+                    f"   {line}"
+                )
 
             draw_line(
                 frame,
@@ -451,8 +525,37 @@ def draw_final_screen(
 
     draw_line(
         frame,
-        "N: New | S: Save | Q: Quit",
-        460,
+        (
+            "Accepted frames: "
+            f"{result['accepted_percentage']:.1f}%"
+        ),
+        445,
+        (255, 255, 255),
+        0.43,
+    )
+
+    if saved_assessment_id is None:
+        save_status = "Not saved"
+        save_color = (0, 165, 255)
+    else:
+        save_status = (
+            f"Saved to database: Record #{saved_assessment_id}"
+        )
+        save_color = (0, 255, 0)
+
+    draw_line(
+        frame,
+        save_status,
+        472,
+        save_color,
+        0.42,
+        1,
+    )
+
+    draw_line(
+        frame,
+        "N: New | S: Save to DB | Q: Quit",
+        500,
         (0, 255, 255),
         0.43,
         2,
@@ -463,27 +566,41 @@ def draw_failed_screen(
     frame,
     result: dict,
 ) -> None:
-    """Display an insufficient-data message."""
+    """Display an incomplete-assessment message."""
 
-    draw_panel_background(frame)
+    draw_panel_background(
+        frame,
+        width=690,
+        height=340,
+    )
 
     draw_line(
         frame,
         "Assessment Incomplete",
         60,
         (0, 165, 255),
-        0.8,
+        0.78,
         2,
     )
 
-    draw_line(
-        frame,
+    wrapped_message = textwrap.wrap(
         result["message"],
-        115,
-        (0, 165, 255),
-        0.5,
-        2,
+        width=65,
     )
+
+    y_position = 110
+
+    for line in wrapped_message:
+        draw_line(
+            frame,
+            line,
+            y_position,
+            (0, 165, 255),
+            0.48,
+            2,
+        )
+
+        y_position += 30
 
     draw_line(
         frame,
@@ -491,21 +608,29 @@ def draw_failed_screen(
             f"Valid samples: {result['sample_count']} / "
             f"{result['required_samples']}"
         ),
-        165,
+        235,
     )
 
     draw_line(
         frame,
         "Press N to reposition and try again.",
-        225,
+        285,
         (0, 255, 255),
-        0.58,
+        0.56,
         2,
+    )
+
+    draw_line(
+        frame,
+        "N: New assessment | Q: Quit",
+        320,
+        (255, 255, 255),
+        0.45,
     )
 
 
 def start_webcam() -> None:
-    """Start the reliable timed posture assessment."""
+    """Start the PostureCheck AI application."""
 
     camera = cv2.VideoCapture(
         0,
@@ -546,11 +671,27 @@ def start_webcam() -> None:
         PostureFeedbackGenerator()
     )
 
+    database = AssessmentDatabase(
+        database_path="data/posturecheck.db"
+    )
+
+    saved_assessment_id = None
+
+    history_summary = database.get_summary()
+
     print("PostureCheck AI started.")
     print("SPACE: Start assessment")
     print("N: New assessment")
-    print("S: Save completed result")
+    print("S: Save completed result to database")
     print("Q: Quit")
+    print(
+        "Assessment database: "
+        f"{database.database_path}"
+    )
+    print(
+        "Previously saved assessments: "
+        f"{history_summary['total_assessments']}"
+    )
 
     try:
         while True:
@@ -592,7 +733,6 @@ def start_webcam() -> None:
                 raw_analysis
             )
 
-            # Use raw measurements for robust final aggregation.
             assessment_engine.update(
                 raw_analysis
             )
@@ -617,6 +757,7 @@ def start_webcam() -> None:
                 draw_ready_screen(
                     frame,
                     live_analysis,
+                    history_summary,
                 )
 
             elif (
@@ -645,6 +786,7 @@ def start_webcam() -> None:
                 draw_final_screen(
                     frame,
                     assessment_engine.final_result,
+                    saved_assessment_id,
                 )
 
             elif (
@@ -675,6 +817,8 @@ def start_webcam() -> None:
                         "valid",
                         False,
                     ):
+                        saved_assessment_id = None
+
                         assessment_engine.start()
 
                         print(
@@ -682,31 +826,83 @@ def start_webcam() -> None:
                         )
                     else:
                         print(
-                            "Cannot start: keep your head, "
-                            "shoulders, and hips visible."
+                            "Cannot start assessment. "
+                            "Keep your head, shoulders, "
+                            "and hips visible."
                         )
 
             if key == ord("n"):
                 assessment_engine.reset()
                 posture_smoother.reset()
 
+                saved_assessment_id = None
+
+                history_summary = (
+                    database.get_summary()
+                )
+
                 print(
                     "Ready for a new assessment."
                 )
 
             if key == ord("s"):
-                saved_file = (
-                    assessment_engine.save_csv()
+                completed_result = (
+                    assessment_engine.final_result
                 )
 
-                if saved_file:
-                    print(
-                        f"Assessment saved to: {saved_file}"
-                    )
-                else:
+                if (
+                    assessment_engine.state
+                    != assessment_engine.COMPLETE
+                    or not completed_result
+                ):
                     print(
                         "Complete an assessment before saving."
                     )
+
+                elif saved_assessment_id is not None:
+                    print(
+                        "This assessment is already saved "
+                        f"as record #{saved_assessment_id}."
+                    )
+
+                else:
+                    try:
+                        saved_assessment_id = (
+                            database.save_assessment(
+                                completed_result
+                            )
+                        )
+
+                        completed_result[
+                            "database_id"
+                        ] = saved_assessment_id
+
+                        history_summary = (
+                            database.get_summary()
+                        )
+
+                        print(
+                            "Assessment saved successfully."
+                        )
+
+                        print(
+                            "Database record ID: "
+                            f"{saved_assessment_id}"
+                        )
+
+                        print(
+                            "Database location: "
+                            f"{database.database_path}"
+                        )
+
+                    except (
+                        ValueError,
+                        sqlite3.Error,
+                    ) as error:
+                        print(
+                            "Unable to save assessment: "
+                            f"{error}"
+                        )
 
     finally:
         camera.release()
